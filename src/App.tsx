@@ -19,13 +19,17 @@ type ChatMessage = {
   mine?: boolean;
 };
 
-type PersistedChatState = {
-  activeConversationId: number;
-  draft: string;
+type ChatServerState = {
+  conversations: Conversation[];
   messagesByConversation: Record<number, ChatMessage[]>;
 };
 
-const STORAGE_KEY = 'hybechat.chat-state.v1';
+type UiState = {
+  activeConversationId: number;
+  draft: string;
+};
+
+const UI_STORAGE_KEY = 'hybechat.ui-state.v2';
 
 const conversations: Conversation[] = [
   {
@@ -73,31 +77,39 @@ const initialMessages: Record<number, ChatMessage[]> = {
   ],
 };
 
-function loadPersistedState(): PersistedChatState | null {
+function loadUiState(): UiState {
   if (typeof window === 'undefined') {
-    return null;
+    return {
+      activeConversationId: 1,
+      draft: '',
+    };
   }
 
-  const storedState = window.localStorage.getItem(STORAGE_KEY);
+  const storedState = window.localStorage.getItem(UI_STORAGE_KEY);
 
   if (!storedState) {
-    return null;
+    return {
+      activeConversationId: 1,
+      draft: '',
+    };
   }
 
   try {
-    return JSON.parse(storedState) as PersistedChatState;
+    return JSON.parse(storedState) as UiState;
   } catch {
-    return null;
+    return {
+      activeConversationId: 1,
+      draft: '',
+    };
   }
 }
 
 function App() {
-  const persistedState = loadPersistedState();
-  const [activeConversationId, setActiveConversationId] = useState(persistedState?.activeConversationId ?? 1);
-  const [draft, setDraft] = useState(persistedState?.draft ?? '');
-  const [messagesByConversation, setMessagesByConversation] = useState(
-    persistedState?.messagesByConversation ?? initialMessages,
-  );
+  const persistedUiState = loadUiState();
+  const [activeConversationId, setActiveConversationId] = useState(persistedUiState.activeConversationId);
+  const [draft, setDraft] = useState(persistedUiState.draft);
+  const [messagesByConversation, setMessagesByConversation] = useState(initialMessages);
+  const [syncStatus, setSyncStatus] = useState<'connecting' | 'online' | 'offline'>('connecting');
   const messageStreamRef = useRef<HTMLElement | null>(null);
 
   const activeConversation = useMemo(
@@ -109,14 +121,49 @@ function App() {
 
   useEffect(() => {
     window.localStorage.setItem(
-      STORAGE_KEY,
+      UI_STORAGE_KEY,
       JSON.stringify({
         activeConversationId,
         draft,
-        messagesByConversation,
       }),
     );
-  }, [activeConversationId, draft, messagesByConversation]);
+  }, [activeConversationId, draft]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadChatState = async () => {
+      try {
+        const response = await fetch('/api/chat-state');
+
+        if (!response.ok) {
+          throw new Error('Failed to load chat state');
+        }
+
+        const data = (await response.json()) as ChatServerState;
+
+        if (!isMounted) {
+          return;
+        }
+
+        setMessagesByConversation(data.messagesByConversation);
+        setSyncStatus('online');
+      } catch {
+        if (!isMounted) {
+          return;
+        }
+
+        setMessagesByConversation(initialMessages);
+        setSyncStatus('offline');
+      }
+    };
+
+    void loadChatState();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   useEffect(() => {
     const messageStream = messageStreamRef.current;
@@ -126,41 +173,82 @@ function App() {
     }
   }, [activeConversationId, activeMessages.length]);
 
-  const handleResetLocalData = () => {
-    window.localStorage.removeItem(STORAGE_KEY);
+  const handleResetLocalData = async () => {
+    window.localStorage.removeItem(UI_STORAGE_KEY);
     setActiveConversationId(1);
     setDraft('');
-    setMessagesByConversation(initialMessages);
+
+    try {
+      const response = await fetch('/api/chat-reset', {
+        method: 'POST',
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to reset server state');
+      }
+
+      const data = (await response.json()) as ChatServerState;
+      setMessagesByConversation(data.messagesByConversation);
+      setSyncStatus('online');
+    } catch {
+      setMessagesByConversation(initialMessages);
+      setSyncStatus('offline');
+    }
   };
 
-  const handleSendMessage = () => {
+  const handleSendMessage = async () => {
     const trimmedDraft = draft.trim();
 
     if (!trimmedDraft) {
       return;
     }
 
-    const nextMessage: ChatMessage = {
-      id: activeMessages.length + 1,
-      sender: 'You',
-      text: trimmedDraft,
-      time: 'Now',
-      mine: true,
-    };
+    try {
+      const response = await fetch('/api/chat-messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          conversationId: activeConversationId,
+          text: trimmedDraft,
+        }),
+      });
 
-    setMessagesByConversation((currentMessages) => ({
-      ...currentMessages,
-      [activeConversationId]: [...(currentMessages[activeConversationId] ?? []), nextMessage],
-    }));
+      if (!response.ok) {
+        throw new Error('Failed to send message');
+      }
+
+      const data = (await response.json()) as ChatServerState;
+      setMessagesByConversation(data.messagesByConversation);
+      setSyncStatus('online');
+    } catch {
+      const nextMessage: ChatMessage = {
+        id: activeMessages.length + 1,
+        sender: 'You',
+        text: trimmedDraft,
+        time: 'Now',
+        mine: true,
+      };
+
+      setMessagesByConversation((currentMessages) => ({
+        ...currentMessages,
+        [activeConversationId]: [...(currentMessages[activeConversationId] ?? []), nextMessage],
+      }));
+      setSyncStatus('offline');
+    }
+
     setDraft('');
   };
 
   const handleComposerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
       event.preventDefault();
-      handleSendMessage();
+      void handleSendMessage();
     }
   };
+
+  const statusLabel = syncStatus === 'online' ? 'Live sync' : syncStatus === 'offline' ? 'Offline fallback' : 'Connecting...';
 
   return (
     <div className="app-shell">
@@ -170,7 +258,7 @@ function App() {
             <p className="eyebrow">HYBECHAT</p>
             <h1 className="app-title">Private fan messaging</h1>
           </div>
-          <span className="status-pill">Saved locally</span>
+          <span className="status-pill">{statusLabel}</span>
         </div>
 
         <button type="button" className="reset-button" onClick={handleResetLocalData}>
@@ -248,7 +336,7 @@ function App() {
             />
             <span className="composer-hint">Press Ctrl/⌘ + Enter to send</span>
           </label>
-          <button type="button" className="send-button" onClick={handleSendMessage} disabled={!draft.trim()}>
+          <button type="button" className="send-button" onClick={() => void handleSendMessage()} disabled={!draft.trim()}>
             Send
           </button>
         </footer>
