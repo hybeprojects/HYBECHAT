@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 
 type Conversation = {
@@ -98,6 +98,7 @@ function App() {
   const [messagesByConversation, setMessagesByConversation] = useState(
     persistedState?.messagesByConversation ?? initialMessages,
   );
+  const messageStreamRef = useRef<HTMLElement | null>(null);
 
   const activeConversation = useMemo(
     () => conversations.find((conversation) => conversation.id === activeConversationId) ?? conversations[0],
@@ -116,6 +117,21 @@ function App() {
       }),
     );
   }, [activeConversationId, draft, messagesByConversation]);
+
+  useEffect(() => {
+    const messageStream = messageStreamRef.current;
+
+    if (messageStream) {
+      messageStream.scrollTop = messageStream.scrollHeight;
+    }
+  }, [activeConversationId, activeMessages.length]);
+
+  const handleResetLocalData = () => {
+    window.localStorage.removeItem(STORAGE_KEY);
+    setActiveConversationId(1);
+    setDraft('');
+    setMessagesByConversation(initialMessages);
+  };
 
   const handleSendMessage = () => {
     const trimmedDraft = draft.trim();
@@ -156,6 +172,10 @@ function App() {
           </div>
           <span className="status-pill">Saved locally</span>
         </div>
+
+        <button type="button" className="reset-button" onClick={handleResetLocalData}>
+          Reset local demo
+        </button>
 
         <div className="profile-card">
           <div>
@@ -203,7 +223,7 @@ function App() {
           </div>
         </header>
 
-        <section className="message-stream" aria-label="Messages">
+        <section className="message-stream" aria-label="Messages" ref={messageStreamRef}>
           {activeMessages.map((message) => (
             <article key={message.id} className={`message-bubble ${message.mine ? 'mine' : 'theirs'}`}>
               <div className="message-topline">
