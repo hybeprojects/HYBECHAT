@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import type { KeyboardEvent } from 'react';
 
 type Conversation = {
   id: number;
@@ -98,6 +99,13 @@ function App() {
     setDraft('');
   };
 
+  const handleComposerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+      event.preventDefault();
+      handleSendMessage();
+    }
+  };
+
   return (
     <div className="app-shell">
       <aside className="sidebar-panel">
@@ -174,11 +182,13 @@ function App() {
               id="message-input"
               value={draft}
               onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={handleComposerKeyDown}
               placeholder="Type a message to the room..."
               rows={3}
             />
+            <span className="composer-hint">Press Ctrl/⌘ + Enter to send</span>
           </label>
-          <button type="button" className="send-button" onClick={handleSendMessage}>
+          <button type="button" className="send-button" onClick={handleSendMessage} disabled={!draft.trim()}>
             Send
           </button>
         </footer>

@@ -271,6 +271,11 @@ button {
   gap: 0.45rem;
 }
 
+.composer-hint {
+  font-size: 0.78rem;
+  color: #8f9fbd;
+}
+
 .composer-label {
   font-size: 0.85rem;
   color: #9fb0d0;
@@ -300,6 +305,12 @@ button {
   background: linear-gradient(135deg, #8a63ff, #54a6ff);
   color: #fff;
   font-weight: 700;
+}
+
+.send-button:disabled {
+  cursor: not-allowed;
+  background: rgba(122, 132, 160, 0.28);
+  color: #9da8bf;
 }
 
 .insights-panel {
