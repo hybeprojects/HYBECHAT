@@ -1,4 +1,5 @@
 import { createServer } from 'node:http';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 
 const PORT = Number(process.env.API_PORT ?? 8787);
 
@@ -52,6 +53,8 @@ const createState = () => ({
   messagesByConversation: structuredClone(initialMessages),
 });
 
+const stateFileUrl = new URL('./data/chat-state.json', import.meta.url);
+
 let state = createState();
 
 const headers = {
@@ -64,6 +67,26 @@ const headers = {
 function sendJson(response, statusCode, payload) {
   response.writeHead(statusCode, headers);
   response.end(JSON.stringify(payload));
+}
+
+async function loadStateFromDisk() {
+  try {
+    const fileContents = await readFile(stateFileUrl, 'utf8');
+    const parsedState = JSON.parse(fileContents);
+
+    if (parsedState?.messagesByConversation) {
+      return parsedState;
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+async function saveStateToDisk() {
+  await mkdir(new URL('./data/', import.meta.url), { recursive: true });
+  await writeFile(stateFileUrl, JSON.stringify(state, null, 2));
 }
 
 function readJsonBody(request) {
@@ -85,6 +108,12 @@ function readJsonBody(request) {
     });
     request.on('error', reject);
   });
+}
+
+const persistedState = await loadStateFromDisk();
+
+if (persistedState) {
+  state = persistedState;
 }
 
 const server = createServer(async (request, response) => {
@@ -132,6 +161,8 @@ const server = createServer(async (request, response) => {
         },
       };
 
+      await saveStateToDisk();
+
       sendJson(response, 200, {
         conversations,
         messagesByConversation: state.messagesByConversation,
@@ -145,6 +176,7 @@ const server = createServer(async (request, response) => {
 
   if (request.method === 'POST' && url.pathname === '/api/chat-reset') {
     state = createState();
+    await saveStateToDisk();
     sendJson(response, 200, {
       conversations,
       messagesByConversation: state.messagesByConversation,
