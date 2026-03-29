@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 
 type Conversation = {
@@ -18,6 +18,14 @@ type ChatMessage = {
   time: string;
   mine?: boolean;
 };
+
+type PersistedChatState = {
+  activeConversationId: number;
+  draft: string;
+  messagesByConversation: Record<number, ChatMessage[]>;
+};
+
+const STORAGE_KEY = 'hybechat.chat-state.v1';
 
 const conversations: Conversation[] = [
   {
@@ -65,10 +73,31 @@ const initialMessages: Record<number, ChatMessage[]> = {
   ],
 };
 
+function loadPersistedState(): PersistedChatState | null {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  const storedState = window.localStorage.getItem(STORAGE_KEY);
+
+  if (!storedState) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(storedState) as PersistedChatState;
+  } catch {
+    return null;
+  }
+}
+
 function App() {
-  const [activeConversationId, setActiveConversationId] = useState(1);
-  const [draft, setDraft] = useState('');
-  const [messagesByConversation, setMessagesByConversation] = useState(initialMessages);
+  const persistedState = loadPersistedState();
+  const [activeConversationId, setActiveConversationId] = useState(persistedState?.activeConversationId ?? 1);
+  const [draft, setDraft] = useState(persistedState?.draft ?? '');
+  const [messagesByConversation, setMessagesByConversation] = useState(
+    persistedState?.messagesByConversation ?? initialMessages,
+  );
 
   const activeConversation = useMemo(
     () => conversations.find((conversation) => conversation.id === activeConversationId) ?? conversations[0],
@@ -76,6 +105,17 @@ function App() {
   );
 
   const activeMessages = messagesByConversation[activeConversationId] ?? [];
+
+  useEffect(() => {
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        activeConversationId,
+        draft,
+        messagesByConversation,
+      }),
+    );
+  }, [activeConversationId, draft, messagesByConversation]);
 
   const handleSendMessage = () => {
     const trimmedDraft = draft.trim();
@@ -114,7 +154,7 @@ function App() {
             <p className="eyebrow">HYBECHAT</p>
             <h1 className="app-title">Private fan messaging</h1>
           </div>
-          <span className="status-pill">Online</span>
+          <span className="status-pill">Saved locally</span>
         </div>
 
         <div className="profile-card">
